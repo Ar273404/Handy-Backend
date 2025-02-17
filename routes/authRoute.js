@@ -1,9 +1,7 @@
 import express from 'express';
 import upload from '../utils/multer.js';
-import { login, signup, userInfo } from '../Controllers/AuthController.js';
+import {signup,login,userInfo} from '../Controllers/authController.js'
 import verifyToken from '../Middleware/authMiddleware.js';
-
-
 const router = express.Router();
 
 router.post('/signup', upload.fields([
