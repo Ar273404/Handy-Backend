@@ -2,14 +2,13 @@ import User from "../Models/User.js";
 import bcrypt, { genSalt } from "bcrypt";
 import jwt from "jsonwebtoken";
 
-// Helper function to generate a JWT token
 const generateToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET_KEY, {
-    expiresIn: process.env.COOKIE_EXPIRES_IN || "7d", // Default to 7 days if not provided
+    expiresIn: process.env.COOKIE_EXPIRES_IN,
   });
 };
 
-// Signup function
+// signup
 const signup = async (req, res) => {
   try {
     const {
@@ -27,15 +26,17 @@ const signup = async (req, res) => {
       expectedCompensation,
     } = req.body;
 
-    // Ensure required fields are provided
+    console.log(coordinates);
+    console.log(Array.isArray(coordinates));
+
     if (!name || !email || !password || !city || !state || !country) {
       return res.status(400).json({
-        message: "Please fill in all the required fields",
+        message: "Fill all the required fields",
         success: false,
       });
     }
 
-    // Check if email already exists
+    // Checking if the email already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res
@@ -43,15 +44,15 @@ const signup = async (req, res) => {
         .json({ message: "Email is already registered", success: false });
     }
 
-    // Hash the password
+    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Get file paths for profileImage and aadharCard
+    // Get file URLs from Cloudinary
     const profileImage = req.files?.profileImage?.[0]?.path || null;
     const aadharCard = req.files?.aadharCard?.[0]?.path || null;
 
-    // Create a new user object
+    // Create user
     const newUser = new User({
       name,
       email,
@@ -66,22 +67,21 @@ const signup = async (req, res) => {
       expectedCompensation,
     });
 
-    // Save the user to the database
     await newUser.save();
-
+    console.log(res);
     return res
       .status(201)
       .json({ message: "User registered successfully", success: true });
   } catch (err) {
-    console.error("Signup error:", err.message);
+    console.log("Server Register error", err.message);
     return res.status(500).json({
       success: false,
-      message: "Error occurred during signup",
+      message: "Signup error from server side",
     });
   }
 };
 
-// Login function
+// Login
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -89,88 +89,101 @@ const login = async (req, res) => {
     if (!(email && password)) {
       return res.status(400).json({
         success: false,
-        message: "Both email and password are required",
+        message: "All fileds are required...",
       });
     }
 
     // Find user by email
     const user = await User.findOne({ email });
+
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // Compare the password with the hashed one
+    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // Generate a JWT token
-    const token = generateToken(user._id);
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email }, // payload
+      process.env.JWT_SECRET_KEY, // secret key
+      {
+        expiresIn: "7d", // optional (token expiry)
+      }
+    );
 
-    // Set the token in an HTTP-only cookie
+    // Set token in a secure cookie
     res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // Ensure it works only in production if using HTTPS
-      sameSite: "none", // Set to 'Strict' or 'Lax' if you're not using third-party cookies
-      maxAge: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Cookie expiry
+      httpOnly: true, // Can't be accessed by JavaScript
+      secure: true, // Use HTTPS for secure cookie
+      sameSite: "none", // CSRF protection
+      maxAge: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Cookie expires after 7 days
     });
-
+    console.log(token);
     return res.status(200).json({
       success: true,
-      message: "Login successful",
+      message: "Login successfully",
+      token,
       userType: user.userType,
       profileImage: user.profileImage,
     });
   } catch (error) {
-    console.error("Login error:", error.message);
+    console.log("Server login error", error.message);
     return res.status(500).json({
       success: false,
-      message: "Error occurred during login",
+      message: "Server login error",
     });
   }
 };
 
-// Logout function
+// Logout
 const logout = (req, res) => {
   res.clearCookie("token"); // Clear the cookie on logout
   return res.status(200).json({ message: "Logged out successfully" });
 };
 
-// User info function to fetch user data
+// user-info
+// to get the logged-in user's details
 const userInfo = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
+
     if (!user) {
-      return res
-        .status(404)
-        .json({ message: "User not found", success: false });
+      return res.status(404).json({ message: "User not found", success: true });
     }
 
+    console.log("user " + user);
+
+    // Return the user's profile information
     res.status(200).json({ user, success: true });
   } catch (error) {
-    console.error("Error fetching user info:", error.message);
+    console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// Middleware to protect routes
+// Middleware to protect routes (verify JWT token)
 const protect = async (req, res, next) => {
   try {
     const token = req.cookies.token;
+
     if (!token) {
       return res.status(401).json({ message: "Not authorized, no token" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
     req.user = await User.findById(decoded.id);
+
     if (!req.user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    next(); // Allow the request to continue
+    next();
   } catch (err) {
-    console.error("Authorization error:", err.message);
+    console.error(err);
     return res.status(401).json({ message: "Not authorized, invalid token" });
   }
 };
